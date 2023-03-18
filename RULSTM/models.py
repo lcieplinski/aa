@@ -58,6 +58,9 @@ class RULSTM(nn.Module):
         self.classifier = nn.Sequential(nn.Dropout(dropout), nn.Linear(hidden, num_class))
         self.sequence_completion = sequence_completion
         self.return_context = return_context
+        print('model: num_class', num_class, ', feat_in', feat_in, 'hidden', hidden,
+              'dropout', dropout, 'depth', depth, 'sequence_completion', sequence_completion,
+              'return_context',return_context)
 
     def forward(self, inputs):
         # permute the inputs for compatibility with the LSTM

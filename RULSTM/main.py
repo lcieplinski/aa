@@ -13,6 +13,8 @@ import pandas as pd
 import json
 pd.options.display.float_format = '{:05.2f}'.format
 
+
+
 parser = ArgumentParser(description="Training program for RULSTM")
 parser.add_argument('mode', type=str, choices=['train', 'validate', 'test', 'test', 'validate_json'], default='train',
                     help="Whether to perform training, validation or test.\
@@ -57,7 +59,7 @@ parser.add_argument('--feats_in', type=int, nargs='+', default=[1024, 1024, 352]
 parser.add_argument('--dropout', type=float, default=0.8, help="Dropout rate")
 
 parser.add_argument('--batch_size', type=int, default=128, help="Batch Size")
-parser.add_argument('--num_workers', type=int, default=4,
+parser.add_argument('--num_workers', type=int, default=0,
                     help="Number of parallel thread to fetch the data")
 parser.add_argument('--lr', type=float, default=0.01, help="Learning rate")
 parser.add_argument('--momentum', type=float, default=0.9, help="Momentum")
@@ -80,6 +82,8 @@ parser.add_argument('--json_directory', type=str, default = None, help = 'Direct
 
 args = parser.parse_args()
 
+print('args', args)
+
 if args.mode == 'test' or args.mode=='validate_json':
     assert args.json_directory is not None
 
@@ -96,7 +100,6 @@ if args.mt5r:
 if args.sequence_completion:
     exp_name += '_sequence_completion'
 
-
 if args.visdom:
     # if visdom is required
     # load visdom loggers from torchent
@@ -109,12 +112,15 @@ if args.visdom:
     # define a visdom saver to save the plots
     visdom_saver = VisdomSaver(envs=[exp_name])
 
+
+
 def get_loader(mode, override_modality = None):
     if override_modality:
         path_to_lmdb = join(args.path_to_data, override_modality)
     else:
         path_to_lmdb = join(args.path_to_data, args.modality) if args.modality != 'fusion' else [join(args.path_to_data, m) for m in ['rgb', 'flow', 'obj']]
 
+    print('get_loader: loader for mode', mode, '; path to lmdb', path_to_lmdb)
     kargs = {
         'path_to_lmdb': path_to_lmdb,
         'path_to_csv': join(args.path_to_data, f"{mode}.csv"),
@@ -127,12 +133,15 @@ def get_loader(mode, override_modality = None):
         'challenge': 'test' in mode
     }
 
+    print('get_loader: kargs', kargs)
+
     _set = SequenceDataset(**kargs)
 
     return DataLoader(_set, batch_size=args.batch_size, num_workers=args.num_workers,
                       pin_memory=True, shuffle=mode == 'training')
 
 def get_model():
+    print('get_model: modality:', args.modality, 'mode:', args.mode)
     if args.modality != 'fusion':  # single branch
         model = RULSTM(args.num_class, args.feat_in, args.hidden,
                        args.dropout, sequence_completion=args.sequence_completion)
@@ -140,7 +149,7 @@ def get_model():
         # and inf the flag --ignore_checkpoints has not been specified
         if args.mode == 'train' and not args.ignore_checkpoints and not args.sequence_completion:
             checkpoint = torch.load(join(
-                args.path_to_models, exp_name + '_sequence_completion_best.pth.tar'))['state_dict']
+                args.path_to_models, exp_name + '_sequence_completion_best.pth.tar'), map_location=torch.device('cpu'))['state_dict']
             model.load_state_dict(checkpoint)
     else:
         rgb_model = RULSTM(args.num_class, args.feats_in[0], args.hidden, args.dropout, return_context = args.task=='anticipation')
@@ -170,9 +179,9 @@ def get_model():
 
 def load_checkpoint(model, best=False):
     if best:
-        chk = torch.load(join(args.path_to_models, exp_name + '_best.pth.tar'))
+        chk = torch.load(join(args.path_to_models, exp_name + '_best.pth.tar'), map_location=torch.device('cpu'))
     else:
-        chk = torch.load(join(args.path_to_models, exp_name + '.pth.tar'))
+        chk = torch.load(join(args.path_to_models, exp_name + '.pth.tar'), map_location=torch.device('cpu'))
 
     epoch = chk['epoch']
     best_perf = chk['best_perf']
@@ -285,9 +294,15 @@ def get_scores(model, loader, challenge=False, include_discarded = False):
     else:
         return verb_scores, noun_scores, action_scores, ids
 
-
 def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
     """Training/Validation code"""
+    print('trainval')
+    print('  trainval: model', model)
+    print('  trainval: loaders', loaders)
+    print('  trainval: optimizer', optimizer)
+    print('  trainval: epochs', epochs)
+    print('  trainval: start_epoch', start_epoch)
+    print('  trainval: start_best_perf', start_best_perf)
     best_perf = start_best_perf  # to keep track of the best performing epoch
     for epoch in range(start_epoch, epochs):
         # define training and validation meters
@@ -297,6 +312,7 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
         else:
             accuracy_meter = {'training': ValueMeter(), 'validation': ValueMeter()}
         for mode in ['training', 'validation']:
+            print('  trainval: epoch', epoch, 'mode', mode)
             # enable gradients only if training
             with torch.set_grad_enabled(mode == 'training'):
                 if mode == 'training':
@@ -304,7 +320,14 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
                 else:
                     model.eval()
 
+                #print(loaders[mode][0])
+
+                #a, b = next(iter(loaders[mode]))
+                #print(f"Feature batch shape: {a.size()}")
+                #print(f"Labels batch shape: {b.size()}")
+
                 for i, batch in enumerate(loaders[mode]):
+                    print('    trainval: epoch', epoch, 'batch', i, '/', len(loaders[mode]))
                     x = batch['past_features' if args.task ==
                               'anticipation' else 'action_features']
 
@@ -412,12 +435,16 @@ def get_many_shot():
 def main():
     model = get_model()
     if type(model) == list:
+        print('main: models with device', device)
         model = [m.to(device) for m in model]
     else:
+        print('main: model with device', device)
         model.to(device)
 
     if args.mode == 'train':
+        print('main: training')
         loaders = {m: get_loader(m) for m in ['training', 'validation']}
+        print('main: loaders', loaders)
 
         if args.resume:
             start_epoch, _, start_best_perf = load_checkpoint(model)
@@ -425,9 +452,10 @@ def main():
             start_epoch = 0
             start_best_perf = 0
 
-        optimizer = torch.optim.SGD(
-            model.parameters(), lr=args.lr, momentum=args.momentum)
+        optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+        print('main: optimizer', optimizer)
 
+        print('running trainval')
         trainval(model, loaders, optimizer, args.epochs,
                  start_epoch, start_best_perf)
 

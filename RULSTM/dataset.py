@@ -64,12 +64,13 @@ class SequenceDataset(data.Dataset):
                 action_samples: number of frames to be evenly sampled from each action
         """
 
+        print('dataset init')
+
         # read the csv file
         if challenge:
             self.annotations = pd.read_csv(path_to_csv, header=None, names=['video','start','end'])
         else:
             self.annotations = pd.read_csv(path_to_csv, header=None, names=['video','start','end','verb','noun','action'])
-
         
         self.challenge=challenge
         self.path_to_lmdb = path_to_lmdb
@@ -101,13 +102,18 @@ class SequenceDataset(data.Dataset):
             # otherwise, just load the single LMDB dataset
             self.env = lmdb.open(self.path_to_lmdb, readonly=True, lock=False)
 
+        print('dataset init done')
+
     def __get_frames(self, frames, video):
         """ format file names using the image template """
+        #print('ds get frames')
         frames = np.array(list(map(lambda x: video+"_"+self.img_tmpl.format(x), frames)))
+        #print('ds get frames done')
         return frames
     
     def __populate_lists(self):
         """ Samples a sequence for each action and populates the lists. """
+        #print('ds populate lists')
         for _, a in tqdm(self.annotations.iterrows(), 'Populating Dataset', total = len(self.annotations)):
 
             # sample frames before the beginning of the action
@@ -150,9 +156,13 @@ class SequenceDataset(data.Dataset):
                         self.discarded_labels.append(-1)
                     else:
                         self.discarded_labels.append(a[self.label_type])
+        #print('ds populate lists done')
 
     def __sample_frames_past(self, point):
         """Samples frames before the beginning of the action "point" """
+
+        #print('ds s f p')
+
         # generate the relative timestamps, depending on the requested sequence_length
         # e.g., 2.  , 1.75, 1.5 , 1.25, 1.  , 0.75, 0.5 , 0.25
         # in this case "2" means, sample 2s before the beginning of the action
@@ -176,6 +186,8 @@ class SequenceDataset(data.Dataset):
         if frames.max()>=1:
             frames[frames<1]=frames[frames>=1].min()
 
+        #print('ds s f p done')
+
         return frames
 
     def __len__(self):
@@ -183,6 +195,7 @@ class SequenceDataset(data.Dataset):
 
     def __getitem__(self, index):
         """ sample a given sequence """
+        #print('ds getitem ', index)
         # get past frames
         past_frames = self.past_frames[index]
 
@@ -205,6 +218,8 @@ class SequenceDataset(data.Dataset):
         if self.action_samples:
             # read representations for the action samples
             out['action_features'] = read_data(action_frames, self.env, self.transform)
+
+        #print('ds getitem ', index, 'done')
 
         return out
 
