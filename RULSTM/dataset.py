@@ -48,7 +48,8 @@ class SequenceDataset(data.Dataset):
                 transform = None,
                 challenge = False,
                 past_features = True,
-                action_samples = None):
+                action_samples = None,
+                use_future_samples = False):
         """
             Inputs:
                 path_to_lmdb: path to the folder containing the LMDB dataset
@@ -83,6 +84,10 @@ class SequenceDataset(data.Dataset):
         self.sequence_length = sequence_length
         self.img_tmpl = img_tmpl
         self.action_samples = action_samples
+        self.use_future_samples = use_future_samples
+        # leszek: improve arg handling to perhpaps make it independent or check for compatibility instead of forcing
+        if self.use_future_samples:
+            self.action_samples = 1
         
         # initialize some lists
         self.ids = [] # action ids
@@ -95,12 +100,13 @@ class SequenceDataset(data.Dataset):
         # populate them
         self.__populate_lists()
 
-        # if a list to datasets has been provided, load all of them
-        if isinstance(self.path_to_lmdb, list):
-            self.env = [lmdb.open(l, readonly=True, lock=False) for l in self.path_to_lmdb]
-        else:
-            # otherwise, just load the single LMDB dataset
-            self.env = lmdb.open(self.path_to_lmdb, readonly=True, lock=False)
+#        # if a list to datasets has been provided, load all of them
+#        if isinstance(self.path_to_lmdb, list):
+#            self.env = [lmdb.open(l, readonly=True, lock=False) for l in self.path_to_lmdb]
+#        else:
+#            # otherwise, just load the single LMDB dataset
+#            self.env = lmdb.open(self.path_to_lmdb, readonly=True, lock=False)
+        self.env = None
 
         print('dataset init done')
 
@@ -118,11 +124,13 @@ class SequenceDataset(data.Dataset):
 
             # sample frames before the beginning of the action
             frames = self.__sample_frames_past(a.start)
+            #print('pf', frames[0])
 
             if self.action_samples:
                 # sample frames from the action
                 # to sample n frames, we first sample n+1 frames with linspace, then discard the first one
                 action_frames = np.linspace(a.start, a.end, self.action_samples+1, dtype=int)[1:]
+                #print('af', action_frames[0])
 
             # check if there were enough frames before the beginning of the action
             if frames.min()>=1: #if the smaller frame is at least 1, the sequence is valid
@@ -195,13 +203,30 @@ class SequenceDataset(data.Dataset):
 
     def __getitem__(self, index):
         """ sample a given sequence """
+
         #print('ds getitem ', index)
+
+        if self.env is None:
+            # if a list to datasets has been provided, load all of them
+            if isinstance(self.path_to_lmdb, list):
+                self.env = [lmdb.open(l, readonly=True, lock=False) for l in self.path_to_lmdb]
+            else:
+                # otherwise, just load the single LMDB dataset
+                self.env = lmdb.open(self.path_to_lmdb, readonly=True, lock=False)
+
         # get past frames
         past_frames = self.past_frames[index]
+        #print('past_frames', past_frames)
 
         if self.action_samples:
             # get action frames
             action_frames = self.action_frames[index]
+            #print('action_frames', action_frames)
+
+        # leszek: if use_future_frames make past_frames a concatenation of both
+        if self.use_future_samples:
+            past_frames = np.concatenate((past_frames, action_frames), axis=0)
+            #print('all_frames', past_frames)
 
         # return a dictionary containing the id of the current sequence
         # this is useful to produce the jsons for the challenge

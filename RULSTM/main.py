@@ -43,7 +43,7 @@ parser.add_argument('--img_tmpl', type=str,
 parser.add_argument('--modality', type=str, default='rgb',
                     choices=['rgb', 'flow', 'obj', 'fusion'], help = "Modality. Rgb/flow/obj represent single branches, whereas fusion indicates the whole model with modality attention.")
 parser.add_argument('--sequence_completion', action='store_true',
-                    help='A flag to selec sequence completion pretraining rather than standard training.\
+                    help='A flag to select sequence completion pretraining rather than standard training.\
                             If not selected, a valid checkpoint for sequence completion pretraining\
                             should be available unless --ignore_checkpoints is specified')
 parser.add_argument('--mt5r', action='store_true')
@@ -64,7 +64,7 @@ parser.add_argument('--num_workers', type=int, default=0,
 parser.add_argument('--lr', type=float, default=0.01, help="Learning rate")
 parser.add_argument('--momentum', type=float, default=0.9, help="Momentum")
 
-parser.add_argument('--display_every', type=int, default=10,
+parser.add_argument('--display_every', type=int, default=5,
                     help="Display every n iterations")
 parser.add_argument('--epochs', type=int, default=100, help="Training epochs")
 parser.add_argument('--visdom', action='store_true',
@@ -80,6 +80,8 @@ parser.add_argument('--ek100', action='store_true',
 
 parser.add_argument('--json_directory', type=str, default = None, help = 'Directory in which to save the generated jsons.')
 
+parser.add_argument('--use_future_samples', action='store_true', help='force sequence completion to use action frame')
+
 args = parser.parse_args()
 
 print('args', args)
@@ -90,7 +92,10 @@ if args.mode == 'test' or args.mode=='validate_json':
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 if args.task == 'anticipation':
-    exp_name = f"RULSTM-{args.task}_{args.alpha}_{args.S_enc}_{args.S_ant}_{args.modality}"
+    if args.use_future_samples:
+        exp_name = f"RULSTM-{args.task}_{args.alpha}_{args.S_enc}_{args.S_ant}_h{args.hidden}_{args.modality}_future"
+    else:
+        exp_name = f"RULSTM-{args.task}_{args.alpha}_{args.S_enc}_{args.S_ant}_h{args.hidden}_{args.modality}_normal"
 else:
     exp_name = f"RULSTM-{args.task}_{args.alpha}_{args.S_ant}_{args.modality}"
 
@@ -130,7 +135,8 @@ def get_loader(mode, override_modality = None):
         'past_features': args.task == 'anticipation',
         'sequence_length': args.S_enc + args.S_ant,
         'label_type': ['verb', 'noun', 'action'] if args.mode != 'train' else 'action',
-        'challenge': 'test' in mode
+        'challenge': 'test' in mode,
+        'use_future_samples': args.use_future_samples
     }
 
     print('get_loader: kargs', kargs)
@@ -139,6 +145,7 @@ def get_loader(mode, override_modality = None):
 
     return DataLoader(_set, batch_size=args.batch_size, num_workers=args.num_workers,
                       pin_memory=True, shuffle=mode == 'training')
+
 
 def get_model():
     print('get_model: modality:', args.modality, 'mode:', args.mode)
@@ -159,11 +166,11 @@ def get_model():
 
         if args.task=='early_recognition' or (args.mode == 'train' and not args.ignore_checkpoints):
             checkpoint_rgb = torch.load(join(args.path_to_models,\
-                    exp_name.replace('fusion','rgb') +'_best.pth.tar'))['state_dict']
+                    exp_name.replace('fusion','rgb') +'_best.pth.tar'), map_location=torch.device('cpu'))['state_dict']
             checkpoint_flow = torch.load(join(args.path_to_models,\
-                    exp_name.replace('fusion','flow') +'_best.pth.tar'))['state_dict']
+                    exp_name.replace('fusion','flow') +'_best.pth.tar'), map_location=torch.device('cpu'))['state_dict']
             checkpoint_obj = torch.load(join(args.path_to_models,\
-                    exp_name.replace('fusion','obj') +'_best.pth.tar'))['state_dict']
+                    exp_name.replace('fusion','obj') +'_best.pth.tar'), map_location=torch.device('cpu'))['state_dict']
 
             rgb_model.load_state_dict(checkpoint_rgb)
             flow_model.load_state_dict(checkpoint_flow)
@@ -221,6 +228,7 @@ def log(mode, epoch, loss_meter, accuracy_meter, best_perf=None, green=False):
     if args.visdom:
         visdom_loss_logger.log(epoch, loss_meter.value(), name=mode)
         visdom_accuracy_logger.log(epoch, accuracy_meter.value(), name=mode)
+
 
 def get_scores_early_recognition_fusion(models, loaders):
     verb_scores = 0
@@ -294,6 +302,7 @@ def get_scores(model, loader, challenge=False, include_discarded = False):
     else:
         return verb_scores, noun_scores, action_scores, ids
 
+
 def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
     """Training/Validation code"""
     print('trainval')
@@ -312,7 +321,7 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
         else:
             accuracy_meter = {'training': ValueMeter(), 'validation': ValueMeter()}
         for mode in ['training', 'validation']:
-            print('  trainval: epoch', epoch, 'mode', mode)
+            #print('  trainval: epoch', epoch, 'mode', mode)
             # enable gradients only if training
             with torch.set_grad_enabled(mode == 'training'):
                 if mode == 'training':
@@ -327,9 +336,12 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
                 #print(f"Labels batch shape: {b.size()}")
 
                 for i, batch in enumerate(loaders[mode]):
-                    print('    trainval: epoch', epoch, 'batch', i, '/', len(loaders[mode]))
+                    #print('    trainval: epoch', epoch, 'batch', i, '/', len(loaders[mode]))
                     x = batch['past_features' if args.task ==
                               'anticipation' else 'action_features']
+                    #print(type(batch))
+                    #print(type(x))
+                    #print(x.dim(), x.element_size(), x.numel(), x.size())
 
                     if type(x) == list:
                         x = [xx.to(device) for xx in x]
@@ -398,6 +410,7 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
         save_model(model, epoch+1, accuracy_meter['validation'].value(), best_perf,
                    is_best=is_best)
 
+
 def get_validation_ids():
     unseen_participants_ids = pd.read_csv(join(args.path_to_data, 'validation_unseen_participants_ids.csv'), names=['id'], squeeze=True)
     tail_verbs_ids = pd.read_csv(join(args.path_to_data, 'validation_tail_verbs_ids.csv'), names=['id'], squeeze=True)
@@ -405,6 +418,7 @@ def get_validation_ids():
     tail_actions_ids = pd.read_csv(join(args.path_to_data, 'validation_tail_actions_ids.csv'), names=['id'], squeeze=True)
 
     return unseen_participants_ids, tail_verbs_ids, tail_nouns_ids, tail_actions_ids
+
 
 def get_many_shot():
     """Get many shot verbs, nouns and actions for class-aware metrics (Mean Top-5 Recall)"""
