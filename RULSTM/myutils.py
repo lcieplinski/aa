@@ -17,6 +17,8 @@ parser.add_argument('--inv', type=str, help="Path to validation file")
 parser.add_argument('--ina', type=str, help="Path to actions file")
 parser.add_argument('--outp', type=str, help="Path to output file prefix")
 parser.add_argument('--rpera', type=int, default=10, help='rows to actions ratio')
+parser.add_argument('--caption', type=str, default='caption', help='caption to use if required by function')
+parser.add_argument('--label', type=str, default='label', help='label to use if required by function')
 #parser.add_argument('--alpha', type=float, default=0.25,
 #                    help="Distance between time-steps in seconds")
 args = parser.parse_args()
@@ -128,8 +130,60 @@ def subsample():
     print(f'done: {datetime.datetime.now()}')
 
 
+def make_latex_table_full(caption, label):
+    # open file, read results and tokenise into dict
+    rows = {}
+    tta = ''
+    with open(args.inf, 'r') as inf:
+        header = inf.readline() # ignore
+        lineno = 0
+        while (lin := inf.readline()):
+            print(f'lin: {lin}')
+            if lineno == 10:
+                tta = lin.strip()
+            elif len(lin) > 1:
+                row = {}
+                row['cat'] = lin[0:7]
+                row['met'] = lin[7:25]
+                for c in range(0, 8):
+                    row[c] = lin[25+6*c:25+6*c+5]
+                rows[lineno] = row
+            lineno += 1
+    # print out a table
+    header = '''\\begin{table}[H]
+    \centering
+    \\begin{tabular}{|l|l|r|r|r|r|r|r|r|r|}
+    \hline
+    \\rowcolor[HTML]{FFEEEE} \\textbf{Class} & \\textbf{Metric} & \multicolumn{8}{|c|}{\\textbf{Anticipation time}} \\\\
+       & & \\textbf{2.00s} & \\textbf{1.75s} & \\textbf{1.50s} & \\textbf{1.25s} & \\textbf{1.00s} & \\textbf{0.75s} & \\textbf{0.50s} & \\textbf{0.25s} \\\\ \hline\n'''
+    footer1 = '''    \hline
+    \end{tabular}
+    \caption{Validation results for '''
+    footer2 = ''' \label{'''
+    footerr = '''}}
+\end{table}'''
+    samplerow = '''     4 &         23.23  &         24.65  &          26.46 &          27.88 &          29.49 &          27.68 &         31.72  & \\textbf{33.33} \\\\'''
+    with open(args.outf, 'w') as outf:
+        outf.write(header)
+        for idx, row in rows.items():
+            print(idx, row)
+            if idx > 0 and idx % 3 == 0:
+                outf.write("    \hline\n")
+            outf.write(f"    {row['cat']} & {row['met']}")
+            for c in range(0, 8):
+                outf.write(f" & {row[c]}")
+            outf.write(" \\\\\n")
+        outf.write(f"    \hline\n    \\rowcolor[HTML]{{FFEEFF}} \multicolumn{{10}}{{|l|}}{{{tta}}} \\\\\n")
+        outf.write(footer1)
+        outf.write(caption)
+        outf.write(footer2)
+        outf.write(label)
+        outf.write(footerr)
+
 if __name__ == '__main__':
     if args.fun == 'one_in_many':
         one_in_many()
     elif args.fun == 'subsample':
         subsample()
+    elif args.fun == 'latex_table':
+        make_latex_table_full(args.caption, args.label)

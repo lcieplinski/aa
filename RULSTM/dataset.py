@@ -169,7 +169,7 @@ class SequenceDataset(data.Dataset):
     def __sample_frames_past(self, point):
         """Samples frames before the beginning of the action "point" """
 
-        #print('ds s f p')
+        #print(f'ds s f p {point}')
 
         # generate the relative timestamps, depending on the requested sequence_length
         # e.g., 2.  , 1.75, 1.5 , 1.25, 1.  , 0.75, 0.5 , 0.25

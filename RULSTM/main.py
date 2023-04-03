@@ -11,9 +11,9 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import json
+import torchmetrics
+
 pd.options.display.float_format = '{:05.2f}'.format
-
-
 
 parser = ArgumentParser(description="Training program for RULSTM")
 parser.add_argument('mode', type=str, choices=['train', 'validate', 'test', 'test', 'validate_json'], default='train',
@@ -46,7 +46,7 @@ parser.add_argument('--sequence_completion', action='store_true',
                     help='A flag to select sequence completion pretraining rather than standard training.\
                             If not selected, a valid checkpoint for sequence completion pretraining\
                             should be available unless --ignore_checkpoints is specified')
-parser.add_argument('--mt5r', action='store_true')
+#parser.add_argument('--mt5r', action='store_true')
 
 parser.add_argument('--num_class', type=int, default=2513,
                     help='Number of classes')
@@ -82,6 +82,8 @@ parser.add_argument('--json_directory', type=str, default = None, help = 'Direct
 
 parser.add_argument('--use_future_samples', action='store_true', help='force sequence completion to use action frame')
 
+parser.add_argument('--meter', type=str, default='vm', help = 'value meter for selection of best epoch')
+
 args = parser.parse_args()
 
 print('args', args)
@@ -99,7 +101,7 @@ if args.task == 'anticipation':
 else:
     exp_name = f"RULSTM-{args.task}_{args.alpha}_{args.S_ant}_{args.modality}"
 
-if args.mt5r:
+if args.meter == 'mt5r':
     exp_name += '_mt5r'
 
 if args.sequence_completion:
@@ -116,7 +118,6 @@ if args.visdom:
                                               'title': 'Top5 Acc@1s', 'legend': ['training', 'validation']})
     # define a visdom saver to save the plots
     visdom_saver = VisdomSaver(envs=[exp_name])
-
 
 
 def get_loader(mode, override_modality = None):
@@ -316,8 +317,10 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
     for epoch in range(start_epoch, epochs):
         # define training and validation meters
         loss_meter = {'training': ValueMeter(), 'validation': ValueMeter()}
-        if args.mt5r:
+        if args.meter == 'mt5r':
             accuracy_meter = {'training': MeanTopKRecallMeter(args.num_class), 'validation': MeanTopKRecallMeter(args.num_class)}
+        #elif args.meter == 'loss':
+        #    accuracy_meter = {'training': ArrayValueMeter(args.S_ant), 'validation': ArrayValueMeter(args.S_ant)}
         else:
             accuracy_meter = {'training': ValueMeter(), 'validation': ValueMeter()}
         for mode in ['training', 'validation']:
@@ -375,9 +378,11 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
 
                     # store the values in the meters to keep incremental averages
                     loss_meter[mode].add(loss.item(), bs)
-                    if args.mt5r:
+                    if args.meter == 'mt5r':
                         accuracy_meter[mode].add(preds[:, idx, :].detach().cpu().numpy(),
                                                  y.detach().cpu().numpy())
+                    elif args.meter == 'iloss':
+                        accuracy_meter[mode].add(1/loss_meter[mode].value(), bs)
                     else:
                         accuracy_meter[mode].add(acc, bs)
 
@@ -399,6 +404,8 @@ def trainval(model, loaders, optimizer, epochs, start_epoch, start_best_perf):
                 log(mode, epoch+1, loss_meter[mode], accuracy_meter[mode],
                     max(accuracy_meter[mode].value(), best_perf) if mode == 'validation'
                     else None, green=True)
+
+        #print(f"val accuracy: {accuracy_meter['validation'].value()}")
 
         if best_perf < accuracy_meter['validation'].value():
             best_perf = accuracy_meter['validation'].value()
