@@ -49,7 +49,8 @@ class SequenceDataset(data.Dataset):
                 challenge = False,
                 past_features = True,
                 action_samples = None,
-                use_future_samples = False):
+                use_future_samples = False,
+                past_offset = 0):
         """
             Inputs:
                 path_to_lmdb: path to the folder containing the LMDB dataset
@@ -88,6 +89,7 @@ class SequenceDataset(data.Dataset):
         # leszek: improve arg handling to perhpaps make it independent or check for compatibility instead of forcing
         if self.use_future_samples:
             self.action_samples = 1
+        self.past_offset = past_offset
         
         # initialize some lists
         self.ids = [] # action ids
@@ -164,7 +166,7 @@ class SequenceDataset(data.Dataset):
                         self.discarded_labels.append(-1)
                     else:
                         self.discarded_labels.append(a[self.label_type])
-        #print('ds populate lists done')
+        print(f'ds populate lists done; discarded {len(self.discarded_ids)} sequences')
 
     def __sample_frames_past(self, point):
         """Samples frames before the beginning of the action "point" """
@@ -175,18 +177,24 @@ class SequenceDataset(data.Dataset):
         # e.g., 2.  , 1.75, 1.5 , 1.25, 1.  , 0.75, 0.5 , 0.25
         # in this case "2" means, sample 2s before the beginning of the action
         time_stamps = np.arange(self.time_step,self.time_step*(self.sequence_length+1),self.time_step)[::-1]
+        #print(f'time_stamps: {time_stamps}')
         
         # compute the time stamp corresponding to the beginning of the action
-        end_time_stamp = point/self.fps 
+        end_time_stamp = point/self.fps
+        #print(f'end_time_stamp: {end_time_stamp}')
+        end_time_stamp = end_time_stamp - self.past_offset
+        #print(f'end_time_stamp: {end_time_stamp}')
 
         # subtract time stamps to the timestamp of the last frame
         time_stamps = end_time_stamp-time_stamps
+        #print(f'time_stamps: {time_stamps}')
 
         # convert timestamps to frames
         # use floor to be sure to consider the last frame before the timestamp (important for anticipation!)
         # and never sample any frame after that time stamp 
         frames = np.floor(time_stamps*self.fps).astype(int)
-        
+        #print(f'frames: {frames}')
+
         # sometimes there are not enough frames before the beginning of the action
         # in this case, we just pad the sequence with the first frame
         # this is done by replacing all frames smaller than 1

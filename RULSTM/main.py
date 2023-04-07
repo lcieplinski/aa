@@ -84,6 +84,8 @@ parser.add_argument('--use_future_samples', action='store_true', help='force seq
 
 parser.add_argument('--meter', type=str, default='vm', help = 'value meter for selection of best epoch')
 
+parser.add_argument('--past_offset', type=float, default=0, help='shift start of encoding/anticipation these many seconds into the past')
+
 args = parser.parse_args()
 
 print('args', args)
@@ -137,7 +139,8 @@ def get_loader(mode, override_modality = None):
         'sequence_length': args.S_enc + args.S_ant,
         'label_type': ['verb', 'noun', 'action'] if args.mode != 'train' else 'action',
         'challenge': 'test' in mode,
-        'use_future_samples': args.use_future_samples
+        'use_future_samples': args.use_future_samples,
+        'past_offset': args.past_offset
     }
 
     print('get_loader: kargs', kargs)
